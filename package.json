@@ -1,0 +1,22 @@
+{
+	"name": "advent-of-code-2023",
+	"version": "1.0.0",
+	"description": "",
+	"main": "dist/entry.js",
+	"type:": "module",
+	"scripts": {
+		"start": "pnpm run clean && pnpm run build && pnpm node dist/entry.js",
+		"build": "tsc",
+		"clean": "rm -rf dist",
+		"test": "echo \"Error: no test specified\" && exit 1"
+	},
+	"keywords": [],
+	"author": "",
+	"license": "ISC",
+	"devDependencies": {
+		"typescript": "^5.3.3"
+	},
+	"dependencies": {
+		"node": "^21.2.0"
+	}
+}
