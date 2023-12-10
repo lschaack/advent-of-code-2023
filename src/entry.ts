@@ -4,7 +4,7 @@ import { solvePartOne as threeOne, solvePartTwo as threeTwo } from './day3/solut
 import { solvePartOne as fourOne, solvePartTwo as fourTwo } from './day4/solution';
 import {
 	solvePartOne as fiveOne,
-	// solvePartTwo as fiveTwo,
+	solvePartTwo as fiveTwo,
 } from './day5/solution';
 
 const solutions = [
@@ -16,7 +16,8 @@ const solutions = [
 	// threeTwo,
 	// fourOne,
 	// fourTwo,
-	fiveOne,
+	// fiveOne,
+	fiveTwo,
 ];
 
 solutions.forEach((solve, index) => {

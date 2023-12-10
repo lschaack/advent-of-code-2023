@@ -1,3 +1,4 @@
+import { minimize } from '../common';
 import input from './input';
 
 const example = `seeds: 79 14 55 13
@@ -47,18 +48,21 @@ type Range = {
   sourceStart: number;
   destinationStart: number;
   rangeLength: number;
+  sourceRange: [number, number];
+  destinationRange: [number, number];
+  shift: number;
 }
 
 type Almanac = {
   seeds: number[];
-  maps: Record<MapType, Array<Range>>;
+  maps: Range[][];
 };
 
 // thank you multi-cursor editing
 const matchAlmanac = /^seeds:(?<seeds>[\d\s]+)seed-to-soil map:(?<seedToSoil>[\d\s]+)soil-to-fertilizer map:(?<soilToFertilizer>[\d\s]+)fertilizer-to-water map:(?<fertilizerToWater>[\d\s]+)water-to-light map:(?<waterToLight>[\d\s]+)light-to-temperature map:(?<lightToTemperature>[\d\s]+)temperature-to-humidity map:(?<temperatureToHumidity>[\d\s]+)humidity-to-location map:(?<humidityToLocation>[\d\s]+)$/;
 
 const parseRangeSource = (source: string): Range => {
-  const [sourceStart, destinationStart, rangeLength] = source
+  const [destinationStart, sourceStart, rangeLength] = source
     .split(' ')
     .map(rangeVal => parseInt(rangeVal));
 
@@ -67,6 +71,9 @@ const parseRangeSource = (source: string): Range => {
     sourceStart,
     destinationStart,
     rangeLength,
+    sourceRange: [sourceStart, sourceStart + rangeLength],
+    destinationRange: [destinationStart, destinationStart + rangeLength],
+    shift: destinationStart - sourceStart,
   };
 }
 
@@ -84,22 +91,60 @@ const parseAlmanacSource = (source: string): Almanac => {
 
   return {
     seeds: seeds.trim().split(/\s+/).map(seed => parseInt(seed)),
-    maps: Object.fromEntries(
-      Object
-        .entries(maps)
-        // For each map type (seedToSoil, soilToFertilizer, etc.)...
-        .map(([mapName, rangesSource]) => {
-          // ...get every range within that map type...
-          return [mapName, parseMapSource(rangesSource)]
-        })
-    ) as Record<MapType, Array<Range>>, // Object.fromEntries always has key type `string`
+    maps: Object
+      .values(maps)
+      .map(parseMapSource),
   }
 }
 
+const isInRange = (x: number, [lowerBound, upperBound]: [number, number]) => {
+  return x >= lowerBound && x <= upperBound;
+}
+
+const filterSeed = (seed: number, maps: Almanac['maps']) => {
+  return maps.reduce((position, map) => {
+    for (const filter of map) {
+      if (isInRange(position, filter.sourceRange)) {
+        return position + filter.shift;
+      }
+    }
+    // doesn't match the range of any filter, leave as-is
+    return position;
+  }, seed);
+}
+
 export const solvePartOne = () => {
-  const almanacSource = example;
+  const almanacSource = input;
 
   const almanac = parseAlmanacSource(almanacSource);
 
-  return JSON.stringify(almanac, null, 2);
+  const locations = almanac.seeds
+    .map(seed => filterSeed(seed, almanac.maps))
+
+  return locations.reduce(minimize);
+  // return JSON.stringify(almanac, null, 2);
 };
+
+export const solvePartTwo = () => {
+  const almanacSource = input;
+
+  const almanac = parseAlmanacSource(almanacSource);
+
+  let seedPairs = [];
+  for (let i = 0; i < almanac.seeds.length; i += 2) {
+    seedPairs.push([almanac.seeds[i], almanac.seeds[i + 1]]);
+  }
+
+  let locations = [];
+  for (const [seedStart, rangeLength] of seedPairs) {
+    const nSeeds = seedStart + rangeLength;
+
+    for (let seed = seedStart; seed < seedStart + rangeLength; seed++) {
+      console.log('starting work on seed', seed, '/', nSeeds)
+
+      locations.push(filterSeed(seed, almanac.maps));
+    }
+  }
+
+  return locations.reduce(minimize);
+}
