@@ -1,4 +1,4 @@
-import { minimize } from '../common';
+import { add, minimize } from '../common';
 import input from './input';
 
 const example = `seeds: 79 14 55 13
@@ -54,10 +54,16 @@ type Transform = {
   shift: number;
 }
 
+type Bound = {
+  bound: number;
+  type: 'lower' | 'upper';
+  transform: Transform;
+}
+
 type Almanac = {
   seeds: number[];
   transforms: Transform[][];
-  precomputedTransform: Transform;
+  precomputedTransform: Transform[];
 };
 
 // thank you multi-cursor editing
@@ -182,81 +188,88 @@ const injectAtIndex = <T>(toInject: T[], sourceArray: T[], index: number) => {
   ]
 }
 
-// run a set of ranges through another
-// seed is always one range, but as [a]
-// "filter" a set of input ranges through another, expanding each if 
-const breakUpTransformRanges = (input: Transform[], filterTransforms: Transform[]): Transform[] => {
-  for (let i = 0; i < input.length; i++) {
-    for (let j = 0; j < filterTransforms.length; j++ ) {
-      const a = input[i];
-      const b = filterTransforms[j];
+const createTransform = (sourceRange: Range, shift: number): Transform => ({
+  sourceRange,
+  destinationRange: [sourceRange[0] + shift, sourceRange[1] + shift],
+  shift,
+})
 
-      if (doTransformsOverlap(a, b)) {
-        return breakUpTransformRanges(
-          ,
-          filterTransforms
-        )
-      }
-    }
-  }
-    const a of input) {
-    for (const b of filterTransforms) {
-      if (doTransformsOverlap(a, b)) {
-        // splice a to include all of input before and after the overlap, and then spread the overlap in the place of a
+const createBound = (
+  transform: Transform,
+  which: 'source' | 'destination',
+  type: Bound['type']
+): Bound => {
+  const [lower, upper] = which === 'source' ? transform.sourceRange : transform.destinationRange;
+  const bound = type === 'lower' ? lower : upper;
 
-        return breakUpTransformRanges([
-          ...a.splice()
-          ...breakUpTransformRanges(),
-          ...,
-          
-        ]);
-      }
-    }
-  }
+  return {
+    bound,
+    type,
+    transform,
+  };
 }
 
-const collapseTransforms = (transformMaps: Transform[][]): Transform[] => {
-  return transformMaps.reduce<Transform[]>((collapsedTransform, transformMap) => {
-    // compare each range in `collapsedTransform` compare to each in `transform`,
-    // combining overlapping transforms by breaking up their ranges into separate
-    // transforms which apply one transform, the other, or both
-    return breakUpTransformRanges(collapsedTransform, transformMap);
+/**
+ * This is the algorithm below in visual form - essentially, combine the shifts
+ * from all active transforms at every part of the covered range
+ *
+ * In the diagram below, ":" is used to indicate dropping a line down to the
+ * corresponding index of the bound as it's encountered, 'R' is 'Result'
+ *
+ * A |    1111111
+ *   |    :     :
+ * B | 22222   555555
+ * --+-:--:-:-:-:---:-
+ * R | 22233111665555
+ */
+const joinTransforms = (a: Transform[], b: Transform[]): Transform[] => {
+  // Start by grabbing every bound (upper and lower) of every transform
+  const ascendingRangeBounds = [
+    ...a.flatMap<Bound>(transform => [
+      createBound(transform, 'destination', 'lower'),
+      createBound(transform, 'destination', 'upper'),
+    ]),
+    ...b.flatMap<Bound>(transform => [
+      createBound(transform, 'source', 'lower'),
+      createBound(transform, 'source', 'upper'),
+    ])
+  ].sort(({ bound: a }, { bound: b }) => a - b);
 
-    // TODO: what about transforms that have no overlap? i.e. new ranges in B
-    collapsedTransform.flatMap(a => {
-      // here, this should be a reduce
-      // run the whole of [a] through a reduce so that it can "expand" in response to each newly transform range
-      // or make it recursive?
-      // start w/both of these sorted
-      return breakUpTransformRanges(a, transformMap)
+  const joined: Transform[] = [];
+  const activeTransforms: Set<Transform> = new Set();
+  let prevBound: Bound;
 
-      return transformMap.reduce((expandedTransforms, b) => {
-        if (doTransformsOverlap(a, b)) {
-          const {
-            a: applyA,
-            b: applyB,
-            both: applyBoth
-          } = getOverlaps(a.destinationRange, b.sourceRange);
+  // Join transform maps by combining transforms with overlapping ranges.
+  // Do this by visiting each bound in ascending order, creating a transform
+  // with all combined shifts when a new bound is encountered with at least
+  // one transform already active.
+  for (const currBound of ascendingRangeBounds) {
+    const { bound, type, transform } = currBound;
 
-          const createTransform = (sourceRange: Range, shift: number): Transform => ({
-            sourceRange,
-            destinationRange: [sourceRange[0] + shift, sourceRange[1] + shift],
-            shift,
-          })
+    // close off a new bound with a combined transform accounting for all active shifts
+    if (activeTransforms.size) {
+      const boundRange: Range = [
+        // Crazy logic b/c bound should not necessarily include edges
+        prevBound.bound + Number(prevBound.type === 'upper'),
+        bound
+      ]
 
-          const splitTransforms: Transform[] = [
-            ...applyA.map(range => createTransform(range, a.shift)),
-            ...applyB.map(range => createTransform(range, b.shift)),
-            createTransform(applyBoth, a.shift + b.shift),
-          ].filter(Boolean);
+      const totalShift = Array
+        .from(activeTransforms)
+        .map(({ shift }) => shift)
+        .reduce(add);
 
-          return splitTransforms;
-        } else {
-          return a;
-        }
-      }, [a])
-    })
-  }, []);
+      joined.push(createTransform(boundRange, totalShift));
+    }
+
+    // Now we also need to account for one additional or one fewer shift
+    if (type === 'lower') activeTransforms.add(transform);
+    else activeTransforms.delete(transform);
+
+    prevBound = currBound;
+  }
+
+  return joined;
 }
 
 const parseAlmanacSource = (source: string): Almanac => {
@@ -268,16 +281,15 @@ const parseAlmanacSource = (source: string): Almanac => {
     .values(rawMaps)
     .map(parseMapSource);
 
-  const seedFilter = collapseTransforms(maps);
-
   return {
     seeds: seeds.trim().split(/\s+/).map(seed => parseInt(seed)),
     transforms: maps,
+    precomputedTransform: maps.reduce(joinTransforms),
   }
 }
 
 export const solvePartTwo = () => {
-  const almanacSource = input;
+  const almanacSource = example;
 
   const almanac = parseAlmanacSource(almanacSource);
 
