@@ -35,7 +35,7 @@ humidity-to-location map:
 60 56 37
 56 93 4`;
 
-type MapType = 
+type MapType =
   | 'seedToSoil'
   | 'soilToFertilizer'
   | 'fertilizerToWater'
@@ -57,6 +57,7 @@ type Transform = {
 type Bound = {
   bound: number;
   type: 'lower' | 'upper';
+  which: 'a' | 'b';
   transform: Transform;
 }
 
@@ -93,7 +94,7 @@ const isInRange = (x: number, [lowerBound, upperBound]: Range) => {
   return x >= lowerBound && x <= upperBound;
 }
 
-const filterSeed = (seed: number, maps: Almanac['transforms']) => {
+const findSeedPosition = (seed: number, maps: Almanac['transforms']) => {
   return maps.reduce((position, map) => {
     for (const filter of map) {
       if (isInRange(position, filter.sourceRange)) {
@@ -106,87 +107,12 @@ const filterSeed = (seed: number, maps: Almanac['transforms']) => {
 }
 
 export const solvePartOne = () => {
-  const almanacSource = input;
+  const almanacSource = example;
   const almanac = parseAlmanacSource(almanacSource);
-  const locations = almanac.seeds.map(seed => filterSeed(seed, almanac.transforms))
+  const locations = almanac.seeds.map(seed => findSeedPosition(seed, almanac.transforms))
 
   return locations.reduce(minimize);
 };
-
-const compare: BinaryRangeOperator<RangeRelationship> = ([lowerA, upperA], [lowerB, upperB]) => {
-  if (upperA < lowerB) return 'no-overlap';
-  else if (upperA <= upperB)
-    if (lowerA <= lowerB) return 'partly-contained-lower';
-    else return 'contained';
-  else if (lowerA <= upperB)
-    if (lowerA > lowerB) return 'partly-contained-upper';
-    else return 'contains';
-  else return null;
-}
-
-const intersect: BinaryRangeOperator<Range | null> = (a, b, relationship = compare(a, b)) => {
-  const [lowerA, upperA] = a;
-  const [lowerB, upperB] = b;
-
-  switch(relationship) {
-    case 'no-overlap': return null;
-    case 'partly-contained-lower': return [lowerB, upperA];
-    case 'contained': return [lowerA, upperA];
-    case 'partly-contained-upper': return [lowerA, upperB];
-    case 'contains': return [lowerB, upperB];
-  }
-}
-
-const union: BinaryRangeOperator<Range | null> = (a, b, relationship = compare(a, b)) => {
-  const [lowerA, upperA] = a;
-  const [lowerB, upperB] = b;
-
-  switch(relationship) {
-    case 'no-overlap': return null;
-    case 'partly-contained-lower': return [lowerA, upperB];
-    case 'contained': return [lowerB, upperB];
-    case 'partly-contained-upper': return [lowerB, upperA];
-    case 'contains': return [lowerA, upperA];
-  }
-}
-
-const except: BinaryRangeOperator<Range[] | null> = (a, b, relationship = compare(a, b)) => {
-  const [lowerA, upperA] = a;
-  const [lowerB, upperB] = b;
-
-  switch(relationship) {
-    case 'no-overlap': return [b];
-    case 'partly-contained-lower': return [[lowerA, lowerB - 1]];
-    case 'contained': return null;
-    case 'partly-contained-upper': return [[upperB + 1, upperA]];
-    case 'contains': return [[lowerA, lowerB - 1], [upperB + 1, upperB]];
-  }
-}
-
-type Overlaps = {
-  a: Range[] | null;
-  b: Range[] | null;
-  both: Range | null;
-}
-const getOverlaps: BinaryRangeOperator<Overlaps> = (a, b) => {
-  return {
-    a: except(a, b),
-    b: except(b, a),
-    both: intersect(a, b),
-  }
-}
-
-const doTransformsOverlap = (a: Transform, b: Transform): boolean => {
-  return compare(a.destinationRange, b.sourceRange) !== 'no-overlap';
-}
-
-const injectAtIndex = <T>(toInject: T[], sourceArray: T[], index: number) => {
-  return [
-    ...sourceArray.slice(0, index),
-    ...toInject,
-    ...sourceArray.slice(index  + 1),
-  ]
-}
 
 const createTransform = (sourceRange: Range, shift: number): Transform => ({
   sourceRange,
@@ -196,15 +122,16 @@ const createTransform = (sourceRange: Range, shift: number): Transform => ({
 
 const createBound = (
   transform: Transform,
-  which: 'source' | 'destination',
+  which: Bound['which'],
   type: Bound['type']
 ): Bound => {
-  const [lower, upper] = which === 'source' ? transform.sourceRange : transform.destinationRange;
+  const [lower, upper] = which === 'b' ? transform.sourceRange : transform.destinationRange;
   const bound = type === 'lower' ? lower : upper;
 
   return {
     bound,
     type,
+    which,
     transform,
   };
 }
@@ -219,19 +146,19 @@ const createBound = (
  * A |    1111111
  *   |    :     :
  * B | 22222   555555
- * --+-:--:-:-:-:---:-
+ * --+-:--::---::---:-
  * R | 22233111665555
  */
 const joinTransforms = (a: Transform[], b: Transform[]): Transform[] => {
   // Start by grabbing every bound (upper and lower) of every transform
   const ascendingRangeBounds = [
     ...a.flatMap<Bound>(transform => [
-      createBound(transform, 'destination', 'lower'),
-      createBound(transform, 'destination', 'upper'),
+      createBound(transform, 'a', 'lower'),
+      createBound(transform, 'a', 'upper'),
     ]),
     ...b.flatMap<Bound>(transform => [
-      createBound(transform, 'source', 'lower'),
-      createBound(transform, 'source', 'upper'),
+      createBound(transform, 'b', 'lower'),
+      createBound(transform, 'b', 'upper'),
     ])
   ].sort(({ bound: a }, { bound: b }) => a - b);
 
@@ -243,21 +170,37 @@ const joinTransforms = (a: Transform[], b: Transform[]): Transform[] => {
   // Do this by visiting each bound in ascending order, creating a transform
   // with all combined shifts when a new bound is encountered with at least
   // one transform already active.
+  console.log('a', a);
+  console.log('b', b);
+  console.log('ascendingRangeBounds', ascendingRangeBounds)
   for (const currBound of ascendingRangeBounds) {
     const { bound, type, transform } = currBound;
-
+    
     // close off a new bound with a combined transform accounting for all active shifts
     if (activeTransforms.size) {
+      // FIXME: we need to reason w/destination range, but then generated map should use source range
+      // ^^^^^: to do this, we need to know if both current and previous bound are source or destination
+      // ^ what if we do know?
+      // -> prev = source, curr = source  | []
+      // -> prev = source, curr = dest    | 
+      // -> prev = dest, curr = dest      | 
+      // -> prev = dest, curr = source    | 
+
+      // how do I combine a single pair from the almanac?
       const boundRange: Range = [
-        // Crazy logic b/c bound should not necessarily include edges
-        prevBound.bound + Number(prevBound.type === 'upper'),
-        bound
-      ]
+        prevBound.bound - prevBound.transform.shift,
+        bound - prevBound.transform.shift
+      ];
 
       const totalShift = Array
         .from(activeTransforms)
         .map(({ shift }) => shift)
         .reduce(add);
+
+      // console.log('prevBound', prevBound);
+      // console.log('currBound', currBound);
+      // console.log('boundRange', boundRange);
+      // console.log('totalShift', totalShift);
 
       joined.push(createTransform(boundRange, totalShift));
     }
@@ -298,10 +241,14 @@ export const solvePartTwo = () => {
     seedPairs.push([almanac.seeds[i], almanac.seeds[i + 1]]);
   }
 
+  const transformSingleton = [almanac.precomputedTransform];
+  const _findSeedPosition = (seed: number) => findSeedPosition(seed, transformSingleton);
+
   let locations = [];
   for (const [seedStart, rangeLength] of seedPairs) {
     for (let seed = seedStart; seed < seedStart + rangeLength; seed++) {
-      locations.push(filterSeed(seed, almanac.transforms));
+      console.log('seed', seed, 'of', rangeLength);
+      locations.push(_findSeedPosition(seed));
     }
   }
 

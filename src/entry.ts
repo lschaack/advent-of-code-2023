@@ -16,7 +16,7 @@ const solutions = [
 	// threeTwo,
 	// fourOne,
 	// fourTwo,
-	// fiveOne,
+	fiveOne,
 	fiveTwo,
 ];
 
